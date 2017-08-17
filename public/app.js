@@ -73,17 +73,32 @@ learnjs.landingView = function() {
 learnjs.problemView = function(data) {
   var number = parseInt(data, 10);
   var problem = learnjs.problems[number - 1];
+  var correctFlash = learnjs.createCorrectFlash(number);
 
   var view = learnjs.template("problem-view");
+  var answerArea = view.find(".answer");
   var flash = view.find(".result");
 
+  // fetch and set answer in textarea
+  learnjs.fetchAnswer(number).then(function(data) {
+    if (data.Item) {
+      answerArea.val(data.Item.answer);
+      learnjs.flashElement(flash, correctFlash);
+    }
+  });
+
   function checkAnswerClick() {
-    var answer = view.find(".answer").val();
+    var answer = answerArea.val();
     var result = learnjs.checkAnswer(problem, answer);
-    var element = result
-      ? learnjs.createCorrectFlash(number)
-      : "Incorrect!";
-    learnjs.flashElement(flash, element);
+
+    learnjs.flashElement(flash, result
+      ? correctFlash
+      : "Incorrect!");
+
+    if (result) {
+      learnjs.saveAnswer(number, answer);
+    }
+
     return false;
   }
 
@@ -156,6 +171,64 @@ learnjs.awsRefresh = function() {
 };
 
 learnjs.identity = new $.Deferred();
+
+learnjs.sendDBRequest = function(req, retry) {
+  var promise = new $.Deferred();
+
+  req.on("success", function(res) {
+    promise.resolve(res.data);
+  });
+
+  req.on("error", function(error) {
+    if (error.code === "CredentialError") {
+      learnjs.identity.then(function(identity) {
+        return identity.refresh().then(
+          function() { return retry(); },
+          function() { promise.reject(error); }
+        );
+      });
+    }
+    else {
+      promise.reject(error);
+    }
+  });
+
+  req.send();
+  return promise;
+};
+
+learnjs.saveAnswer = function(problemId, answer) {
+  return learnjs.identity.then(function(identity) {
+    var db = new AWS.DynamoDB.DocumentClient();
+    var item = {
+      TableName: "learnjs",
+      Item: {
+        userId: identity.id,
+        problemId: problemId,
+        answer: answer
+      }
+    };
+    var retry = function() { return learnjs.saveAnswer(problemId, answer); };
+
+    return learnjs.sendDBRequest(db.put(item), retry);
+  });
+};
+
+learnjs.fetchAnswer = function(problemId) {
+  return learnjs.identity.then(function(identity) {
+    var db = new AWS.DynamoDB.DocumentClient();
+    var key = {
+      TableName: "learnjs",
+      Key: {
+        userId: identity.id,
+        problemId: problemId
+      }
+    };
+    var retry = function() { return learnjs.fetchAnswer(problemId); };
+
+    return learnjs.sendDBRequest(db.get(key), retry);
+  });
+};
 
 function onSignIn(googleUser) {
   /*
