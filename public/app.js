@@ -4,6 +4,8 @@ var learnjs = {
   poolId: "us-east-1:5de85cd4-ae4c-45cb-9eb2-7fa641579faf",
 };
 
+learnjs.identity = new $.Deferred();
+
 learnjs.problems = [
   {
     description: "What is truth?",
@@ -162,17 +164,15 @@ learnjs.appOnReady = function() {
 
 learnjs.awsRefresh = function() {
   var deferred = new $.Deferred();
-  AWS.config.credentials.refresh(function(err) {
-    return err
-      ? deferred.reject(err)
+  AWS.config.credentials.refresh(function(error) {
+    return error
+      ? deferred.reject(error)
       : deferred.resolve(AWS.config.credentials.identityId);
   });
   return deferred.promise();
 };
 
-learnjs.identity = new $.Deferred();
-
-learnjs.sendDBRequest = function(req, retry) {
+learnjs.sendAwsRequest = function(req, retry) {
   var promise = new $.Deferred();
 
   req.on("success", function(res) {
@@ -210,7 +210,7 @@ learnjs.saveAnswer = function(problemId, answer) {
     };
     var retry = function() { return learnjs.saveAnswer(problemId, answer); };
 
-    return learnjs.sendDBRequest(db.put(item), retry);
+    return learnjs.sendAwsRequest(db.put(item), retry);
   });
 };
 
@@ -226,7 +226,20 @@ learnjs.fetchAnswer = function(problemId) {
     };
     var retry = function() { return learnjs.fetchAnswer(problemId); };
 
-    return learnjs.sendDBRequest(db.get(key), retry);
+    return learnjs.sendAwsRequest(db.get(key), retry);
+  });
+};
+
+learnjs.popularAnswers = function(problemId) {
+  return learnjs.identity.then(function() {
+    var lambda = new AWS.Lambda();
+    var params = {
+      FunctionName: "learnjs_popularAnswers",
+      Payload: JSON.stringify({ problemNumber: problemId }),
+    };
+    var retry = function() { return learnjs.popularAnswers(problemId); };
+
+    return learnjs.sendAwsRequest(lambda.invoke(params), retry);
   });
 };
 
